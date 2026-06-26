@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Informe IA — GCIA</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<nav>
+  <a href="/" class="nav-logo">🏗️ GC<span>IA</span></a>
+  <a href="/">Inicio</a>
+  <a href="/register">Registrar</a>
+  <a href="/search">Buscar</a>
+  <a href="/report" class="active">Informe IA</a>
+  <div class="nav-spacer"></div>
+  <div class="status-badge">
+    <div class="status-dot" id="status-dot"></div>
+    <span id="status-text">Verificando IA...</span>
+  </div>
+</nav>
+
+<main>
+  <div style="margin-bottom:1.5rem;">
+    <h1 style="font-size:1.6rem; font-weight:800;">Informe de Lecciones por IA</h1>
+    <p style="color:var(--text-muted); margin-top:0.3rem;">La IA busca lecciones relevantes y genera un resumen ejecutivo para tu próximo proyecto.</p>
+  </div>
+
+  <div id="ollama-warning" class="alert alert-warning" style="display:none;">
+    ⚠️ <strong>Sin IA disponible.</strong> El informe mostrará las lecciones encontradas pero sin resumen narrativo. Para activar la IA, instala llama-cpp-python y coloca un modelo <code>.gguf</code> en la carpeta <code>modelo/</code>.
+  </div>
+
+  <div class="form-card" style="margin-bottom:1.5rem;">
+    <div class="form-group">
+      <label>Describe el nuevo proyecto o consulta <span class="form-required">*</span></label>
+      <textarea id="query" rows="3" placeholder="Ej: Vamos a construir un edificio de 15 pisos en zona sísmica cerca del mar. ¿Qué debemos tener en cuenta según experiencias anteriores?"></textarea>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Tipo de proyecto (opcional)</label>
+        <select id="project_type">
+          <option value="">Todos los tipos</option>
+          <option>Edificación</option>
+          <option>Habitacional</option>
+          <option>Industrial</option>
+          <option>Infraestructura</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Número de lecciones a considerar</label>
+        <select id="top_k">
+          <option value="5">5 lecciones</option>
+          <option value="8" selected>8 lecciones</option>
+          <option value="12">12 lecciones</option>
+        </select>
+      </div>
+    </div>
+    <button class="btn btn-primary" onclick="generateReport()" id="gen-btn">
+      ✨ Generar Informe
+    </button>
+  </div>
+
+  <div id="report-section" style="display:none;">
+    <div class="section-header" style="margin-bottom:1rem;">
+      <h2>Informe Generado</h2>
+      <button class="btn btn-outline btn-sm" onclick="printReport()">🖨️ Imprimir</button>
+    </div>
+
+    <div class="report-output" id="report-text" style="margin-bottom:1.5rem;"></div>
+
+    <div class="section-header" style="margin-bottom:0.75rem;">
+      <h2>Lecciones utilizadas (<span id="lessons-count">0</span>)</h2>
+    </div>
+    <div id="source-lessons"></div>
+  </div>
+</main>
+
+<script>
+function categoryBadge(cat) {
+  const cls = ['Plazo','Costo','Seguridad','Calidad','Proveedores','Diseño'].includes(cat) ? `badge-category-${cat}` : 'badge-category-default';
+  return `<span class="badge ${cls}">${cat}</span>`;
+}
+function severityBadge(sev) {
+  const cls = ['Alta','Media','Baja'].includes(sev) ? `badge-severity-${sev}` : 'badge-severity-default';
+  return `<span class="badge ${cls}">${sev}</span>`;
+}
+
+async function loadStatus() {
+  try {
+    const r = await fetch('/api/status');
+    const d = await r.json();
+    const dot = document.getElementById('status-dot');
+    const txt = document.getElementById('status-text');
+    if (d.ai?.available) {
+      dot.className = 'status-dot ok'; txt.textContent = 'IA activa';
+    } else {
+      dot.className = 'status-dot warn'; txt.textContent = 'Sin IA';
+      document.getElementById('ollama-warning').style.display = 'block';
+    }
+  } catch(e) {}
+}
+
+function markdownToHtml(md) {
+  return md
+    .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+    .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/^[-*] (.+)$/gm, '<li>$1</li>')
+    .replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>')
+    .replace(/\n\n/g, '</p><p>')
+    .replace(/^(?!<[hul])/gm, '')
+    .trim();
+}
+
+async function generateReport() {
+  const query = document.getElementById('query').value.trim();
+  if (!query) { alert('Por favor describe el proyecto o consulta.'); return; }
+
+  const btn = document.getElementById('gen-btn');
+  btn.innerHTML = '<span class="spinner"></span> Generando informe...';
+  btn.disabled = true;
+  document.getElementById('report-section').style.display = 'none';
+
+  try {
+    const r = await fetch('/api/report', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        query,
+        project_type: document.getElementById('project_type').value || null,
+        top_k: parseInt(document.getElementById('top_k').value),
+      }),
+    });
+    const d = await r.json();
+
+    // Render markdown report
+    const reportHtml = markdownToHtml(d.report);
+    document.getElementById('report-text').innerHTML = reportHtml || d.report;
+
+    // Render source lessons
+    document.getElementById('lessons-count').textContent = d.lessons_found;
+    document.getElementById('source-lessons').innerHTML = (d.lessons || []).map((l, i) => `
+      <div class="lesson-card severity-${l.severity}" style="cursor:default;">
+        <div class="lesson-card-header">
+          <span style="color:var(--text-muted);font-size:0.82rem;font-weight:700;">#${i+1}</span>
+          <div class="lesson-card-title" style="margin-left:0.5rem;">${l.title}</div>
+        </div>
+        <div class="lesson-card-meta">
+          ${categoryBadge(l.category)} ${severityBadge(l.severity)}
+          <span class="badge badge-phase">${l.phase}</span>
+        </div>
+        <div class="lesson-card-desc">${l.description.substring(0,200)}${l.description.length>200?'...':''}</div>
+        <div class="lesson-card-footer">
+          <span>📁 ${l.project_name} · ${l.project_type}</span>
+        </div>
+      </div>
+    `).join('');
+
+    document.getElementById('report-section').style.display = 'block';
+    document.getElementById('report-section').scrollIntoView({ behavior: 'smooth' });
+  } catch(e) {
+    alert('Error al generar el informe. Verifica que el servidor esté corriendo.');
+  } finally {
+    btn.innerHTML = '✨ Generar Informe';
+    btn.disabled = false;
+  }
+}
+
+function printReport() {
+  const content = document.getElementById('report-text').innerHTML;
+  const win = window.open('', '_blank');
+  win.document.write(`
+    <html><head><title>Informe GCIA</title>
+    <style>body{font-family:system-ui;max-width:800px;margin:2rem auto;padding:1rem;} h2{color:#1c2b4a;margin-top:1.5rem;} ul{padding-left:1.5rem;} li{margin-bottom:0.3rem;}</style>
+    </head><body><h1>Informe de Lecciones Aprendidas</h1><hr>${content}</body></html>
+  `);
+  win.print();
+}
+
+document.getElementById('query').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && e.ctrlKey) generateReport();
+});
+
+loadStatus();
+</script>
+</body>
+</html>

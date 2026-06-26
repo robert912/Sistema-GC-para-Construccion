@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Registrar Lección — GCIA</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<nav>
+  <a href="/" class="nav-logo">🏗️ GC<span>IA</span></a>
+  <a href="/">Inicio</a>
+  <a href="/register" class="active">Registrar</a>
+  <a href="/search">Buscar</a>
+  <a href="/report">Informe IA</a>
+  <div class="nav-spacer"></div>
+  <div class="status-badge">
+    <div class="status-dot" id="status-dot"></div>
+    <span id="status-text">Verificando IA...</span>
+  </div>
+</nav>
+
+<main style="max-width: 720px;">
+
+  <div style="margin-bottom: 1.5rem;">
+    <h1 style="font-size:1.6rem; font-weight:800;">Registrar Lección Aprendida</h1>
+    <p style="color:var(--text-muted); margin-top:0.3rem;">La IA clasificará automáticamente la lección tras el registro.</p>
+  </div>
+
+  <div id="alert-container"></div>
+
+  <div class="form-card">
+    <form id="lesson-form" onsubmit="submitLesson(event)">
+
+      <div class="form-group">
+        <label>Título <span class="form-required">*</span></label>
+        <input type="text" id="title" placeholder="Ej: Falla de proveedor de acero en plena estructura" required maxlength="200">
+        <div class="form-hint">Resume el problema o aprendizaje en una línea.</div>
+      </div>
+
+      <div class="form-group">
+        <label>¿Qué ocurrió? <span class="form-required">*</span></label>
+        <textarea id="description" placeholder="Describe el evento, problema o situación. Sé específico: qué pasó, cuándo, dónde, cómo afectó a la obra." required></textarea>
+      </div>
+
+      <div class="form-group">
+        <label>¿Por qué ocurrió? (Causa raíz)</label>
+        <textarea id="cause" placeholder="Identifica la causa raíz. ¿Qué falló? ¿Qué no se había considerado?"></textarea>
+      </div>
+
+      <div class="form-group">
+        <label>¿Cómo se resolvió? (Solución aplicada)</label>
+        <textarea id="solution" placeholder="Describe cómo se resolvió o mitigó. ¿Qué haría diferente la próxima vez?"></textarea>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>Nombre del proyecto</label>
+          <input type="text" id="project_name" placeholder="Ej: Torre Andes, Edificio Balmaceda">
+        </div>
+        <div class="form-group">
+          <label>Tipo de proyecto</label>
+          <select id="project_type">
+            <option value="Edificación">Edificación</option>
+            <option value="Habitacional">Habitacional</option>
+            <option value="Industrial">Industrial</option>
+            <option value="Infraestructura">Infraestructura</option>
+            <option value="Otro">Otro</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>Registrado por</label>
+        <input type="text" id="created_by" placeholder="Ej: J. Pérez (Jefe de Obra)">
+      </div>
+
+      <div class="ai-note" style="background:#f0f9ff; border:1px solid #bae6fd; border-radius:8px; padding:0.9rem 1.1rem; margin-bottom:1.5rem; font-size:0.87rem; color:#0c4a6e;">
+        🤖 <strong>Clasificación automática:</strong> La IA asignará categoría (Plazo / Costo / Seguridad / Calidad / Proveedores / Diseño), severidad y fase de obra automáticamente al guardar.
+      </div>
+
+      <div style="display:flex; gap:0.75rem;">
+        <button type="submit" class="btn btn-primary" id="submit-btn">
+          Guardar lección
+        </button>
+        <a href="/" class="btn btn-outline">Cancelar</a>
+      </div>
+    </form>
+  </div>
+
+</main>
+
+<script>
+async function loadStatus() {
+  try {
+    const r = await fetch('/api/status');
+    const d = await r.json();
+    const dot = document.getElementById('status-dot');
+    const txt = document.getElementById('status-text');
+    if (d.ai?.available) {
+      dot.className = 'status-dot ok';
+      txt.textContent = 'IA activa';
+    } else {
+      dot.className = 'status-dot warn';
+      txt.textContent = 'Sin IA';
+    }
+  } catch(e) {}
+}
+
+async function submitLesson(e) {
+  e.preventDefault();
+  const btn = document.getElementById('submit-btn');
+  btn.innerHTML = '<span class="spinner"></span> Guardando...';
+  btn.disabled = true;
+
+  const payload = {
+    title: document.getElementById('title').value.trim(),
+    description: document.getElementById('description').value.trim(),
+    cause: document.getElementById('cause').value.trim(),
+    solution: document.getElementById('solution').value.trim(),
+    project_name: document.getElementById('project_name').value.trim(),
+    project_type: document.getElementById('project_type').value,
+    created_by: document.getElementById('created_by').value.trim(),
+  };
+
+  try {
+    const r = await fetch('/api/lessons', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const d = await r.json();
+    if (r.ok) {
+      showAlert('success', `✅ Lección registrada correctamente (ID #${d.id}). La IA está procesando la clasificación en segundo plano.`);
+      document.getElementById('lesson-form').reset();
+    } else {
+      showAlert('error', `Error: ${d.detail || 'No se pudo guardar.'}`);
+    }
+  } catch(err) {
+    showAlert('error', 'Error de conexión con el servidor.');
+  } finally {
+    btn.innerHTML = 'Guardar lección';
+    btn.disabled = false;
+  }
+}
+
+function showAlert(type, msg) {
+  const container = document.getElementById('alert-container');
+  container.innerHTML = `<div class="alert alert-${type}">${msg}</div>`;
+  container.scrollIntoView({ behavior: 'smooth' });
+  setTimeout(() => { container.innerHTML = ''; }, 8000);
+}
+
+loadStatus();
+</script>
+</body>
+</html>

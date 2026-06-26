@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Buscar Lecciones — GCIA</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<nav>
+  <a href="/" class="nav-logo">🏗️ GC<span>IA</span></a>
+  <a href="/">Inicio</a>
+  <a href="/register">Registrar</a>
+  <a href="/search" class="active">Buscar</a>
+  <a href="/report">Informe IA</a>
+  <div class="nav-spacer"></div>
+  <div class="status-badge">
+    <div class="status-dot" id="status-dot"></div>
+    <span id="status-text">Verificando IA...</span>
+  </div>
+</nav>
+
+<main>
+  <div style="margin-bottom:1.5rem;">
+    <h1 style="font-size:1.6rem; font-weight:800;">Buscar Lecciones</h1>
+    <p style="color:var(--text-muted); margin-top:0.3rem;">Búsqueda semántica: encuentra lecciones por significado, no solo palabras exactas.</p>
+  </div>
+
+  <div class="search-bar">
+    <input type="text" id="search-input" placeholder="Ej: problemas con hormigón en zona sísmica, proveedor que falló en acero..." />
+    <button class="btn btn-primary" onclick="doSearch()" id="search-btn">🔍 Buscar</button>
+  </div>
+
+  <div class="filters">
+    <select id="filter-category" onchange="doSearch()">
+      <option value="">Todas las categorías</option>
+      <option>Plazo</option>
+      <option>Costo</option>
+      <option>Seguridad</option>
+      <option>Calidad</option>
+      <option>Proveedores</option>
+      <option>Diseño</option>
+    </select>
+    <select id="filter-severity" onchange="doSearch()">
+      <option value="">Toda severidad</option>
+      <option>Alta</option>
+      <option>Media</option>
+      <option>Baja</option>
+    </select>
+    <button class="btn btn-outline btn-sm" onclick="clearFilters()">Limpiar filtros</button>
+  </div>
+
+  <div id="search-mode-info" class="alert alert-info" style="display:none;"></div>
+  <div id="results-header" style="display:none; margin-bottom:0.75rem; font-size:0.88rem; color:var(--text-muted);"></div>
+  <div id="results-container">
+    <!-- initial: all lessons -->
+  </div>
+</main>
+
+<!-- Detail Modal -->
+<div class="modal-overlay" id="modal-overlay" onclick="closeModal(event)">
+  <div class="modal">
+    <div class="modal-header">
+      <div>
+        <div id="modal-badges" style="margin-bottom:0.5rem;"></div>
+        <h2 id="modal-title" style="font-size:1.2rem;"></h2>
+      </div>
+      <button class="modal-close" onclick="closeModalBtn()">✕</button>
+    </div>
+    <div class="modal-section">
+      <h4>Descripción</h4><p id="modal-desc"></p>
+    </div>
+    <div class="modal-section">
+      <h4>Causa raíz</h4><p id="modal-cause"></p>
+    </div>
+    <div class="modal-section">
+      <h4>Solución aplicada</h4><p id="modal-solution"></p>
+    </div>
+    <div class="modal-section">
+      <h4>Tags</h4><div id="modal-tags"></div>
+    </div>
+    <div class="modal-section" style="font-size:0.82rem;color:var(--text-muted);display:flex;gap:1.5rem;flex-wrap:wrap;">
+      <span>📁 <span id="modal-project"></span></span>
+      <span>👤 <span id="modal-author"></span></span>
+      <span>📅 <span id="modal-date"></span></span>
+    </div>
+    <div style="margin-top:1rem;display:flex;gap:0.5rem;">
+      <button class="btn btn-danger btn-sm" onclick="deleteLesson()">Eliminar</button>
+    </div>
+  </div>
+</div>
+
+<script>
+let currentLessonId = null;
+
+function categoryBadge(cat) {
+  const cls = ['Plazo','Costo','Seguridad','Calidad','Proveedores','Diseño'].includes(cat) ? `badge-category-${cat}` : 'badge-category-default';
+  return `<span class="badge ${cls}">${cat}</span>`;
+}
+function severityBadge(sev) {
+  const cls = ['Alta','Media','Baja'].includes(sev) ? `badge-severity-${sev}` : 'badge-severity-default';
+  return `<span class="badge ${cls}">${sev}</span>`;
+}
+function phaseBadge(ph) { return `<span class="badge badge-phase">${ph}</span>`; }
+
+async function loadStatus() {
+  try {
+    const r = await fetch('/api/status');
+    const d = await r.json();
+    const dot = document.getElementById('status-dot');
+    const txt = document.getElementById('status-text');
+    if (d.ai?.available) {
+      dot.className = 'status-dot ok'; txt.textContent = 'IA activa';
+    } else {
+      dot.className = 'status-dot warn'; txt.textContent = 'Sin IA';
+    }
+    document.getElementById('search-mode-info').style.display = 'block';
+    document.getElementById('search-mode-info').textContent = 'ℹ️ La búsqueda usa coincidencia por palabras clave. La clasificación automática y los informes sí usan IA.';
+  } catch(e) {}
+}
+
+async function loadAll() {
+  const category = document.getElementById('filter-category').value;
+  const severity = document.getElementById('filter-severity').value;
+  let url = '/api/lessons?';
+  if (category) url += `category=${encodeURIComponent(category)}&`;
+  if (severity) url += `severity=${encodeURIComponent(severity)}`;
+  const r = await fetch(url);
+  const lessons = await r.json();
+  renderLessons(lessons.map(l => ({ lesson: l, score: null })));
+  const h = document.getElementById('results-header');
+  h.style.display = 'block';
+  h.textContent = `${lessons.length} lecciones en la base de conocimiento`;
+}
+
+async function doSearch() {
+  const query = document.getElementById('search-input').value.trim();
+  if (!query) { loadAll(); return; }
+
+  const btn = document.getElementById('search-btn');
+  btn.innerHTML = '<span class="spinner" style="border-top-color:white;"></span> Buscando...';
+  btn.disabled = true;
+
+  try {
+    const r = await fetch('/api/search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        query,
+        top_k: 12,
+        category: document.getElementById('filter-category').value || null,
+        severity: document.getElementById('filter-severity').value || null,
+      }),
+    });
+    const results = await r.json();
+    renderLessons(results);
+    const h = document.getElementById('results-header');
+    h.style.display = 'block';
+    h.textContent = `${results.length} resultado(s) para "${query}"`;
+  } catch(e) {
+    document.getElementById('results-container').innerHTML = `<div class="alert alert-error">Error en la búsqueda.</div>`;
+  } finally {
+    btn.innerHTML = '🔍 Buscar';
+    btn.disabled = false;
+  }
+}
+
+function renderLessons(results) {
+  const container = document.getElementById('results-container');
+  if (!results.length) {
+    container.innerHTML = `<div class="empty-state"><div class="empty-icon">🔍</div><h3>Sin resultados</h3><p>Intenta con otras palabras o amplía los filtros.</p></div>`;
+    return;
+  }
+  container.innerHTML = results.map(({ lesson: l, score }) => `
+    <div class="lesson-card severity-${l.severity}" onclick="openModal(${l.id})">
+      <div class="lesson-card-header">
+        <div class="lesson-card-title">${l.title}</div>
+        ${score !== null ? `<span style="font-size:0.8rem;color:var(--text-muted);white-space:nowrap;">${Math.round(score*100)}% relevante</span>` : ''}
+      </div>
+      <div class="lesson-card-meta">
+        ${categoryBadge(l.category)} ${severityBadge(l.severity)} ${phaseBadge(l.phase)}
+      </div>
+      <div class="lesson-card-desc">${l.description.substring(0,180)}${l.description.length > 180 ? '...' : ''}</div>
+      ${score !== null ? `<div class="score-bar"><div class="score-fill" style="width:${Math.round(score*100)}%"></div></div>` : ''}
+      <div class="lesson-card-footer">
+        <span>📁 ${l.project_name || 'Sin proyecto'} · ${l.project_type}</span>
+        <span>${l.created_at?.split(' ')[0] || ''}</span>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function openModal(id) {
+  currentLessonId = id;
+  const r = await fetch(`/api/lessons/${id}`);
+  const l = await r.json();
+  document.getElementById('modal-title').textContent = l.title;
+  document.getElementById('modal-badges').innerHTML = `${categoryBadge(l.category)} ${severityBadge(l.severity)} ${phaseBadge(l.phase)}`;
+  document.getElementById('modal-desc').textContent = l.description;
+  document.getElementById('modal-cause').textContent = l.cause || 'No especificada';
+  document.getElementById('modal-solution').textContent = l.solution || 'No especificada';
+  document.getElementById('modal-tags').innerHTML = (l.tags||[]).map(t=>`<span class="tag">${t}</span>`).join('');
+  document.getElementById('modal-project').textContent = `${l.project_name} (${l.project_type})`;
+  document.getElementById('modal-author').textContent = l.created_by || 'Anónimo';
+  document.getElementById('modal-date').textContent = l.created_at?.split(' ')[0] || '';
+  document.getElementById('modal-overlay').classList.add('open');
+}
+
+async function deleteLesson() {
+  if (!currentLessonId) return;
+  if (!confirm('¿Eliminar esta lección? Esta acción no se puede deshacer.')) return;
+  await fetch(`/api/lessons/${currentLessonId}`, { method: 'DELETE' });
+  closeModalBtn();
+  doSearch();
+}
+
+function closeModal(e) { if (e.target === document.getElementById('modal-overlay')) closeModalBtn(); }
+function closeModalBtn() { document.getElementById('modal-overlay').classList.remove('open'); currentLessonId = null; }
+
+function clearFilters() {
+  document.getElementById('filter-category').value = '';
+  document.getElementById('filter-severity').value = '';
+  document.getElementById('search-input').value = '';
+  loadAll();
+}
+
+// Check for pre-filled query from URL
+const params = new URLSearchParams(window.location.search);
+const preQuery = params.get('q');
+if (preQuery) {
+  document.getElementById('search-input').value = preQuery;
+}
+
+document.getElementById('search-input').addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
+
+loadStatus();
+if (preQuery) doSearch(); else loadAll();
+</script>
+</body>
+</html>

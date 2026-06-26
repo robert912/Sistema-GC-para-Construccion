@@ -1,0 +1,34 @@
+# Modelos de IA (archivos grandes)
+modelo/*.gguf
+modelo/*.bin
+
+# Wheels precompilados
+# wheels/*.whl
+
+# Base de datos (se genera automáticamente con datos de ejemplo)
+backend/lessons.db
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Entornos virtuales
+venv/
+.venv/
+env/
+
+# Variables de entorno
+.env
+.env.local
+
+# Editor
+.vscode/
+.idea/
+*.swp
+
+# Windows
+Thumbs.db
+desktop.ini

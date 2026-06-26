@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GCIA — Sistema de Lecciones Aprendidas</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<nav>
+  <a href="/" class="nav-logo">🏗️ GC<span>IA</span></a>
+  <a href="/" class="active">Inicio</a>
+  <a href="/register">Registrar</a>
+  <a href="/search">Buscar</a>
+  <a href="/report">Informe IA</a>
+  <div class="nav-spacer"></div>
+  <div class="status-badge">
+    <div class="status-dot" id="status-dot"></div>
+    <span id="status-text">Verificando IA...</span>
+  </div>
+</nav>
+
+<main>
+  <div class="hero">
+    <h1>Gestión de Conocimiento en Construcción</h1>
+    <p>Registra, clasifica y consulta lecciones aprendidas de tus proyectos con inteligencia artificial local.</p>
+    <div class="hero-search">
+      <input type="text" id="quick-search" placeholder="¿Qué quieres consultar? Ej: problemas con hormigón en zona húmeda..." />
+      <button onclick="goSearch()">Buscar</button>
+    </div>
+  </div>
+
+  <div class="stats-grid" id="stats-grid">
+    <div class="stat-card"><div class="stat-value" id="stat-total">—</div><div class="stat-label">Lecciones registradas</div></div>
+    <div class="stat-card"><div class="stat-value" id="stat-ai">—</div><div class="stat-label">Clasificadas por IA</div></div>
+    <div class="stat-card"><div class="stat-value" id="stat-alta">—</div><div class="stat-label">Severidad Alta</div></div>
+    <div class="stat-card"><div class="stat-value" id="stat-cat">—</div><div class="stat-label">Categoría más frecuente</div></div>
+  </div>
+
+  <div class="section-header">
+    <h2>Lecciones Recientes</h2>
+    <a href="/register" class="btn btn-primary">+ Registrar lección</a>
+  </div>
+
+  <div id="lessons-container">
+    <div class="empty-state"><div class="empty-icon">⏳</div><p>Cargando lecciones...</p></div>
+  </div>
+
+  <div style="text-align:center; margin-top:1.5rem;">
+    <a href="/search" class="btn btn-outline">Ver todas las lecciones →</a>
+  </div>
+</main>
+
+<!-- Detail Modal -->
+<div class="modal-overlay" id="modal-overlay" onclick="closeModal(event)">
+  <div class="modal" id="modal">
+    <div class="modal-header">
+      <div>
+        <div id="modal-badges" style="margin-bottom:0.5rem;"></div>
+        <h2 id="modal-title" style="font-size:1.2rem;"></h2>
+      </div>
+      <button class="modal-close" onclick="closeModalBtn()">✕</button>
+    </div>
+    <div class="modal-section">
+      <h4>Descripción</h4>
+      <p id="modal-desc"></p>
+    </div>
+    <div class="modal-section" id="modal-cause-wrap">
+      <h4>Causa raíz</h4>
+      <p id="modal-cause"></p>
+    </div>
+    <div class="modal-section" id="modal-solution-wrap">
+      <h4>Solución aplicada</h4>
+      <p id="modal-solution"></p>
+    </div>
+    <div class="modal-section">
+      <h4>Tags</h4>
+      <div id="modal-tags"></div>
+    </div>
+    <div class="modal-section" style="font-size:0.82rem; color:var(--text-muted); display:flex; gap:1.5rem;">
+      <span>📁 <span id="modal-project"></span></span>
+      <span>👤 <span id="modal-author"></span></span>
+      <span>📅 <span id="modal-date"></span></span>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = '';
+
+function categoryBadge(cat) {
+  const cls = ['Plazo','Costo','Seguridad','Calidad','Proveedores','Diseño'].includes(cat)
+    ? `badge-category-${cat}` : 'badge-category-default';
+  return `<span class="badge ${cls}">${cat}</span>`;
+}
+function severityBadge(sev) {
+  const cls = ['Alta','Media','Baja'].includes(sev) ? `badge-severity-${sev}` : 'badge-severity-default';
+  return `<span class="badge ${cls}">${sev}</span>`;
+}
+function phaseBadge(ph) {
+  return `<span class="badge badge-phase">${ph}</span>`;
+}
+
+async function loadStatus() {
+  try {
+    const r = await fetch('/api/status');
+    const d = await r.json();
+    const dot = document.getElementById('status-dot');
+    const txt = document.getElementById('status-text');
+    if (d.ai?.available) {
+      dot.className = 'status-dot ok';
+      txt.textContent = 'IA activa';
+    } else {
+      dot.className = 'status-dot warn';
+      txt.textContent = 'Sin IA';
+    }
+  } catch(e) {}
+}
+
+async function loadStats() {
+  try {
+    const r = await fetch('/api/stats');
+    const d = await r.json();
+    document.getElementById('stat-total').textContent = d.total;
+    document.getElementById('stat-ai').textContent = d.ai_processed;
+    document.getElementById('stat-alta').textContent = d.by_severity?.['Alta'] || 0;
+    const topCat = Object.entries(d.by_category || {}).sort((a,b) => b[1]-a[1])[0];
+    document.getElementById('stat-cat').textContent = topCat ? topCat[0] : '—';
+  } catch(e) {}
+}
+
+async function loadLessons() {
+  try {
+    const r = await fetch('/api/lessons');
+    const lessons = await r.json();
+    const container = document.getElementById('lessons-container');
+    if (!lessons.length) {
+      container.innerHTML = `<div class="empty-state"><div class="empty-icon">📋</div><h3>Sin lecciones registradas</h3><p>Sé el primero en registrar una lección aprendida.</p></div>`;
+      return;
+    }
+    container.innerHTML = lessons.slice(0, 6).map(l => `
+      <div class="lesson-card severity-${l.severity}" onclick="openModal(${l.id})">
+        <div class="lesson-card-header">
+          <div class="lesson-card-title">${l.title}</div>
+        </div>
+        <div class="lesson-card-meta">
+          ${categoryBadge(l.category)}
+          ${severityBadge(l.severity)}
+          ${phaseBadge(l.phase)}
+        </div>
+        <div class="lesson-card-desc">${l.description.substring(0,160)}${l.description.length > 160 ? '...' : ''}</div>
+        <div class="lesson-card-footer">
+          <span>📁 ${l.project_name || 'Sin proyecto'}</span>
+          <span>${l.created_at?.split(' ')[0] || ''}</span>
+        </div>
+      </div>
+    `).join('');
+  } catch(e) {
+    document.getElementById('lessons-container').innerHTML = `<div class="alert alert-error">Error al cargar lecciones.</div>`;
+  }
+}
+
+let allLessons = [];
+async function openModal(id) {
+  try {
+    const r = await fetch(`/api/lessons/${id}`);
+    const l = await r.json();
+    document.getElementById('modal-title').textContent = l.title;
+    document.getElementById('modal-badges').innerHTML = `${categoryBadge(l.category)} ${severityBadge(l.severity)} ${phaseBadge(l.phase)}`;
+    document.getElementById('modal-desc').textContent = l.description;
+    document.getElementById('modal-cause').textContent = l.cause || 'No especificada';
+    document.getElementById('modal-solution').textContent = l.solution || 'No especificada';
+    document.getElementById('modal-tags').innerHTML = (l.tags||[]).map(t=>`<span class="tag">${t}</span>`).join('');
+    document.getElementById('modal-project').textContent = `${l.project_name} (${l.project_type})`;
+    document.getElementById('modal-author').textContent = l.created_by || 'Anónimo';
+    document.getElementById('modal-date').textContent = l.created_at?.split(' ')[0] || '';
+    document.getElementById('modal-overlay').classList.add('open');
+  } catch(e) {}
+}
+function closeModal(e) { if (e.target === document.getElementById('modal-overlay')) closeModalBtn(); }
+function closeModalBtn() { document.getElementById('modal-overlay').classList.remove('open'); }
+
+function goSearch() {
+  const q = document.getElementById('quick-search').value.trim();
+  if (q) window.location.href = `/search?q=${encodeURIComponent(q)}`;
+  else window.location.href = '/search';
+}
+document.getElementById('quick-search').addEventListener('keydown', e => { if (e.key === 'Enter') goSearch(); });
+
+loadStatus();
+loadStats();
+loadLessons();
+</script>
+</body>
+</html>

@@ -24,4 +24,9 @@ REM Open browser after 2 seconds
 start /min "" cmd /c "timeout /t 2 /nobreak >nul && start http://localhost:8000"
 
 cd /d "%~dp0backend"
-uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+if %errorlevel% neq 0 (
+    echo.
+    echo ERROR: El servidor no pudo iniciarse. Revisa los mensajes de arriba.
+    pause
+)
